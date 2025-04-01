@@ -1,0 +1,83 @@
+services:
+  online-shop:
+    image: high-load-course
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    networks:
+      - external_network
+    depends_on:
+      - postgres
+    environment:
+      TEST_SERVICE_IP: "host.docker.internal"
+      POSTGRES_ADDRESS: ${POSTGRES_ADDRESS}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      PAYMENT_HOST: ${PAYMENT_HOST}
+      PAYMENT_PORT: ${PAYMENT_PORT}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  postgres:
+    hostname: postgres
+    image: postgres:14.9-alpine
+    env_file:
+      - ./.env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - ${POSTGRES_CONTAINER_EXPOSED_PORT}:${POSTGRES_CONTAINER_INTERNAL_PORT}
+    command: postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all -c max_connections=200
+    restart: unless-stopped
+    networks:
+      - external_network
+
+  bombardier:
+    image: ghcr.io/andrsuh/bombardier:${BOMBARDIER_VERSION:-latest}
+    build: .
+    ports:
+      - "1234:1234"
+    restart: unless-stopped
+    networks:
+      - external_network
+    environment:
+      - TEST_SERVICE_IP=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  prometheus:
+    image: quay.io/prometheus/prometheus:v2.32.0
+    user: root
+    volumes:
+      - ./prometheus/data:/prometheus
+      - ./prometheus:/etc/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "9090:9090"
+    networks:
+      - external_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana
+    user: root
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=quipy
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - 3000:3000
+    depends_on:
+      - prometheus
+    networks:
+      - external_network
+
+networks:
+  external_network:
+    driver: bridge
